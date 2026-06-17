@@ -1,0 +1,27 @@
+name: focuscam_app
+description: A Flutter study accountability app.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Camera
+  camera: ^0.10.5+9
+
+  # Google ML Kit (Face Detection)
+  google_mlkit_face_detection: ^0.11.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

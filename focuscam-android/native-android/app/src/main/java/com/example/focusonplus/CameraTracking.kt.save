@@ -1,0 +1,138 @@
+package com.example.focusonplus
+
+import android.annotation.SuppressLint
+import android.content.Context
+import androidx.camera.core.*
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.LifecycleOwner
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import java.util.concurrent.Executors
+import com.google.mlkit.vision.face.*
+import com.google.mlkit.vision.common.InputImage
+import kotlin.concurrent.fixedRateTimer
+
+@Composable
+fun TimerCameraScreen(navController: androidx.navigation.NavController, duration: String) {
+    val context = LocalContext.current
+    var faceDetected by remember { mutableStateOf(true) }
+    var seconds by remember { mutableStateOf(0) }
+    var studying by remember { mutableStateOf(false) }
+    var grace by remember { mutableStateOf(0) }
+
+    val detector = remember {
+        FaceDetection.getClient(
+            FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .build()
+        )
+    }
+
+    LaunchedEffect(studying) {
+        if (studying) {
+            fixedRateTimer(period = 1000) {
+                if (studying) seconds++
+            }
+        }
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxSize().padding(16.dp)
+    ) {
+
+        CameraPreview(context, detector) { found ->
+            faceDetected = found
+            if (!found) grace++
+            if (grace >= 3 && studying) studying = false
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Text("Time: $seconds sec")
+
+        Button(
+            onClick = { studying = !studying },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (studying) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Text(if (studying) "Stop" else "Study")
+        }
+    }
+}
+
+@SuppressLint("UnsafeOptInUsageError")
+@Composable
+fun CameraPreview(
+    context: Context,
+    detector: FaceDetector,
+    onFaceDetected: (Boolean) -> Unit
+) {
+    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+    val cameraExecutor = Executors.newSingleThreadExecutor()
+
+    AndroidView(factory = { ctx ->
+        val previewView = androidx.camera.view.PreviewView(ctx)
+
+        cameraProviderFuture.addListener({
+            val cameraProvider = cameraProviderFuture.get()
+
+            val preview = Preview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
+
+            val analysis = ImageAnalysis.Builder().build().also {
+                it.setAnalyzer(cameraExecutor) { imageProxy ->
+                    processImage(detector, imageProxy, onFaceDetected)
+                }
+            }
+
+            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                context as LifecycleOwner,
+                cameraSelector,
+                preview,
+                analysis
+            )
+        }, androidx.core.content.ContextCompat.getMainExecutor(ctx))
+
+        previewView
+    }, modifier = Modifier
+        .fillMaxWidth()
+        .height(280.dp))
+}
+
+fun processImage(
+    detector: FaceDetector,
+    imageProxy: ImageProxy,
+    onFaceDetected: (Boolean) -> Unit
+) {
+    val mediaImage = imageProxy.image ?: run {
+        imageProxy.close(); return
+    }
+
+    val image = InputImage.fromMediaImage(
+        mediaImage,
+        imageProxy.imageInfo.rotationDegrees
+    )
+
+    detector.process(image)
+        .addOnSuccessListener {
+            onFaceDetected(it.isNotEmpty())
+            imageProxy.close()
+        }
+        .addOnFailureListener {
+            onFaceDetected(false)
+            imageProxy.close()
+        }
+}
+

@@ -1,0 +1,80 @@
+package androidx.compose.ui.res
+
+import android.content.res.Resources
+import androidx.annotation.DrawableRes
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.VectorPainter
+import androidx.compose.ui.graphics.vector.compat.seekToStartTag
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalImageVectorCache
+import androidx.compose.ui.platform.LocalResourceIdCache
+
+@Composable
+fun painterResource(@DrawableRes id: Int): Painter {
+    val context = LocalContext.current
+
+    // Query the current configuration in order to recompose during configuration changes
+    LocalConfiguration.current
+    val res = context.resources
+    val resourceIdCache = LocalResourceIdCache.current
+    val value = resourceIdCache.resolveResourcePath(res, id)
+
+    val path = value.string
+    // Assume .xml suffix implies loading a VectorDrawable resource
+    return if (path?.endsWith(".xml") == true) {
+        val imageVector = loadVectorResource(context.theme, res, id, value.changingConfigurations)
+        rememberVectorPainter(imageVector)
+    } else {
+        // Otherwise load the bitmap resource
+        val imageBitmap = remember(path, id, context.theme) {
+            loadImageBitmapResource(path, res, id)
+        }
+        BitmapPainter(imageBitmap)
+    }
+}
+
+@Composable
+private fun loadVectorResource(
+    theme: Resources.Theme,
+    res: Resources,
+    id: Int,
+    changingConfigurations: Int
+): ImageVector {
+    val imageVectorCache = LocalImageVectorCache.current
+    val key = ImageVectorCache.Key(theme, id)
+    var imageVectorEntry = imageVectorCache[key]
+    if (imageVectorEntry == null) {
+        @Suppress("ResourceType") val parser = res.getXml(id)
+        if (parser.seekToStartTag().name != "vector") {
+            throw IllegalArgumentException(errorMessage)
+        }
+        imageVectorEntry = loadVectorResourceInner(theme, res, parser, changingConfigurations)
+        imageVectorCache[key] = imageVectorEntry
+    }
+    return imageVectorEntry.imageVector
+}
+
+private fun loadImageBitmapResource(path: CharSequence, res: Resources, id: Int): ImageBitmap {
+    try {
+        return ImageBitmap.imageResource(res, id)
+    } catch (exception: Exception) {
+        throw ResourceResolutionException("Error attempting to load resource: $path", exception)
+    }
+}
+
+class ResourceResolutionException(
+    message: String,
+    cause: Throwable
+) : RuntimeException(message, cause)
+
+private const val errorMessage =
+    "Only VectorDrawables and rasterized asset types are supported ex. PNG, JPG, WEBP"
